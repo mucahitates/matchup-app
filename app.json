@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "saha-app",
-    "slug": "saha-app",
+    "name": "MatchUp",
+    "slug": "matchup",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "sahaapp",
+    "scheme": "matchupapp",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
