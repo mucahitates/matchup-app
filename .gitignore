@@ -44,3 +44,6 @@ example
 
 # enviroment secrets
 .env
+
+# Sql schema
+.schema.sql
