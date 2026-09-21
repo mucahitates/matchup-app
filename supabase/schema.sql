@@ -134,3 +134,49 @@ $$ language plpgsql;
 create trigger trg_promote_waitlist
   after update on activity_participants
   for each row execute function fn_promote_waitlist();
+
+
+  
+-- OTOMASYON 3: Otomatik rastgele takım oluşturma
+-- Takım sporlarında (sports.category = 'team') kontenjan tam dolunca,
+-- onaylı katılımcılar rastgele iki takıma (A/B) bölünür.
+-- Test edildi: 2 kişilik basketbol aktivitesinde, 2. onaydan hemen
+-- sonra her iki katılımcıya da otomatik A/B takımı atandı.
+create function fn_assign_teams()
+returns trigger as $$
+declare
+  v_capacity int;
+  v_category text;
+  v_approved_count int;
+begin
+  if new.status = 'approved' and (old.status is distinct from 'approved') then
+
+    select a.capacity, s.category into v_capacity, v_category
+      from activities a
+      join sports s on s.id = a.sport_id
+      where a.id = new.activity_id;
+
+    select count(*) into v_approved_count
+      from activity_participants
+      where activity_id = new.activity_id and status = 'approved';
+
+    if v_category = 'team' and v_approved_count >= v_capacity then
+      with shuffled as (
+        select id, ntile(2) over (order by random()) as grp
+        from activity_participants
+        where activity_id = new.activity_id and status = 'approved'
+      )
+      update activity_participants ap
+      set team = case when s.grp = 1 then 'A' else 'B' end
+      from shuffled s
+      where ap.id = s.id;
+    end if;
+  end if;
+
+  return new;
+end;
+$$ language plpgsql;
+
+create trigger trg_assign_teams
+  after update on activity_participants
+  for each row execute function fn_assign_teams();
