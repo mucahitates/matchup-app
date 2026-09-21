@@ -102,3 +102,35 @@ $$ language plpgsql;
 create trigger trg_apply_or_waitlist
   before insert on activity_participants
   for each row execute function fn_apply_or_waitlist();
+
+  
+-- OTOMASYON 2: Waitlist terfisi
+-- Onaylı bir katılımcı iptal ederse veya reddedilirse, waitlist'teki
+-- en eski başvuran kişi otomatik olarak onaylanır.
+-- Test edildi: onaylı Mehmet iptal edince, waitlist'teki Ahmet
+-- otomatik olarak approved oldu.
+create function fn_promote_waitlist()
+returns trigger as $$
+declare
+  v_next_id uuid;
+begin
+  if old.status = 'approved' and new.status in ('cancelled', 'rejected') then
+    select id into v_next_id
+      from activity_participants
+      where activity_id = old.activity_id and status = 'waitlisted'
+      order by applied_at asc
+      limit 1;
+
+    if v_next_id is not null then
+      update activity_participants set status = 'approved'
+        where id = v_next_id;
+    end if;
+  end if;
+
+  return new;
+end;
+$$ language plpgsql;
+
+create trigger trg_promote_waitlist
+  after update on activity_participants
+  for each row execute function fn_promote_waitlist();
