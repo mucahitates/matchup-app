@@ -21,3 +21,16 @@ insert into sports (name, category, min_players, max_players) values
   ('Tenis (Çiftli)', 'individual', 4, 4),
   ('Padel', 'individual', 4, 4),
   ('Masa Tenisi', 'individual', 2, 2);
+
+  
+-- PROFILES: auth.users'ı genişletir, uygulamaya özel bilgileri tutar.
+-- Telefon numarası burada YOK (mahremiyet kararı) - o sadece
+-- Supabase'in kendi auth.users tablosunda kalıyor.
+create table profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  full_name text not null,
+  avatar_url text,
+  bio text,
+  city text default 'İstanbul',
+  created_at timestamptz default now()
+);
