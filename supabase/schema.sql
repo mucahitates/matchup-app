@@ -34,3 +34,24 @@ create table profiles (
   city text default 'İstanbul',
   created_at timestamptz default now()
 );
+
+
+-- ACTIVITIES: kaptanın açtığı aktiviteler.
+-- district = herkese açık (bölge/mahalle bilgisi)
+-- full_address = veritabanında her zaman dolu, ama erişimi RLS ile
+-- kısıtlayacağız (sadece onaylı katılımcı/kaptan görebilecek) - bu
+-- kısıtlamayı henüz yazmadık, sırası 5. adımda gelecek.
+create table activities (
+  id uuid primary key default gen_random_uuid(),
+  captain_id uuid not null references profiles(id) on delete cascade,
+  sport_id uuid not null references sports(id),
+  title text not null,
+  description text,
+  district text not null,
+  full_address text not null,
+  scheduled_at timestamptz not null,
+  capacity int not null check (capacity > 0),
+  price_per_person numeric(10,2),
+  status text not null default 'open' check (status in ('open', 'full', 'completed', 'cancelled')),
+  created_at timestamptz default now()
+);
