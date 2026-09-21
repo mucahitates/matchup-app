@@ -71,3 +71,34 @@ create table activity_participants (
 
   unique (activity_id, user_id)
 );
+
+
+
+-- OTOMASYON 1: Waitlist
+-- Bir başvuru geldiğinde, kontenjan zaten doluysa (onaylı sayısı >=
+-- capacity), yeni başvuruyu otomatik olarak 'waitlisted' yap.
+-- Test edildi: kapasitesi 2 olan bir aktivitede, 2 kişi onaylandıktan
+-- sonra 3. başvuru otomatik waitlisted oldu.
+create function fn_apply_or_waitlist()
+returns trigger as $$
+declare
+  v_capacity int;
+  v_approved_count int;
+begin
+  select capacity into v_capacity from activities where id = new.activity_id;
+
+  select count(*) into v_approved_count
+    from activity_participants
+    where activity_id = new.activity_id and status = 'approved';
+
+  if v_approved_count >= v_capacity then
+    new.status := 'waitlisted';
+  end if;
+
+  return new;
+end;
+$$ language plpgsql;
+
+create trigger trg_apply_or_waitlist
+  before insert on activity_participants
+  for each row execute function fn_apply_or_waitlist();
