@@ -55,3 +55,19 @@ create table activities (
   status text not null default 'open' check (status in ('open', 'full', 'completed', 'cancelled')),
   created_at timestamptz default now()
 );
+
+
+-- ACTIVITY_PARTICIPANTS: başvuru / onay / waitlist / takım ataması.
+-- Otomasyon (waitlist'e otomatik düşme, takımların otomatik oluşması)
+-- HENÜZ YOK - bu sade tablo, otomasyonu ayrı bir adımda (trigger'larla)
+-- ekleyeceğiz, ikisini karıştırmamak için.
+create table activity_participants (
+  id uuid primary key default gen_random_uuid(),
+  activity_id uuid not null references activities(id) on delete cascade,
+  user_id uuid not null references profiles(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected', 'waitlisted', 'cancelled')),
+  team text check (team in ('A', 'B')),
+  applied_at timestamptz default now(),
+
+  unique (activity_id, user_id)
+);
