@@ -266,3 +266,43 @@ create policy "participants_update" on activity_participants for update
     auth.uid() = user_id
     or auth.uid() in (select captain_id from activities where id = activity_id)
   );
+
+  
+-- ============================================
+-- DISTRICTS: sabit bölge/ilçe listesi (sports ile aynı mantık -
+-- UI'da sabit veri tutmak yerine veritabanında, genişleyebilir).
+-- ============================================
+create table districts (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  city text not null default 'İstanbul',
+
+  unique (name, city)
+);
+
+insert into districts (name, city) values
+  ('Kadıköy', 'İstanbul'),
+  ('Şişli', 'İstanbul'),
+  ('Beşiktaş', 'İstanbul'),
+  ('Üsküdar', 'İstanbul'),
+  ('Ataşehir', 'İstanbul'),
+  ('Bakırköy', 'İstanbul');
+
+alter table districts enable row level security;
+create policy "districts_select_all" on districts for select using (true);
+
+
+-- ============================================
+-- GRANT'ler - RLS'ten AYRI bir katman. RLS "hangi satırı görebilirsin"
+-- sorusu, GRANT "bu tabloya hiç erişimin var mı" sorusu. Proje
+-- oluşturulurken "Automatically expose new tables" kapatıldığı için
+-- (bilinçli güvenlik kararı), her tabloya erişimi burada elle veriyoruz.
+-- ============================================
+grant select on sports to anon, authenticated;
+grant select on districts to anon, authenticated;
+grant select, insert, update, delete on profiles to authenticated;
+grant select, insert, update, delete on activities to authenticated;
+grant select, insert, update on activity_participants to authenticated;
+
+grant select on activities to anon;
+grant select on profiles to anon;
