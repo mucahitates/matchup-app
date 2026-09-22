@@ -73,6 +73,15 @@ create table activity_participants (
 );
 
 
+-- Oyuncu kiralama özelliği (basit versiyon - Seçenek A):
+-- Fiyat sadece bilgi amaçlı, gerçek ödeme uygulama dışında.
+-- Kaptanlar bu alanlara göre "kiralanabilir" oyuncuları arayıp
+-- davet edebilecek (arama ekranı ayrı bir aşamada eklenecek).
+alter table profiles
+  add column available_for_hire boolean not null default false,
+  add column hire_price numeric(10,2);
+
+
 
 -- OTOMASYON 1: Waitlist
 -- Bir başvuru geldiğinde, kontenjan zaten doluysa (onaylı sayısı >=
@@ -180,3 +189,4 @@ $$ language plpgsql;
 create trigger trg_assign_teams
   after update on activity_participants
   for each row execute function fn_assign_teams();
+
