@@ -1,10 +1,14 @@
 -- ============================================
 -- MatchUp veritabanı şeması
--- Her tablo, Supabase SQL Editor'de test edildikten
--- sonra buraya kaydediliyor (kayıt altında tutmak için).
+-- Her blok, Supabase SQL Editor'de test edildikten sonra
+-- buraya kaydediliyor (kayıt altında tutmak ve projeyi
+-- başka bir ortamda yeniden kurabilmek için).
 -- ============================================
 
--- SPORTS: sabit referans listesi (futbol, basketbol vs.)
+
+-- ============================================
+-- 1) SPORTS: sabit referans listesi (futbol, basketbol vs.)
+-- ============================================
 create table sports (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
@@ -22,10 +26,12 @@ insert into sports (name, category, min_players, max_players) values
   ('Padel', 'individual', 4, 4),
   ('Masa Tenisi', 'individual', 2, 2);
 
-  
--- PROFILES: auth.users'ı genişletir, uygulamaya özel bilgileri tutar.
--- Telefon numarası burada YOK (mahremiyet kararı) - o sadece
--- Supabase'in kendi auth.users tablosunda kalıyor.
+
+-- ============================================
+-- 2) PROFILES: auth.users'ı genişletir, uygulamaya özel
+-- bilgileri tutar. Telefon numarası burada YOK (mahremiyet
+-- kararı) - o sadece Supabase'in auth.users tablosunda kalıyor.
+-- ============================================
 create table profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null,
@@ -35,12 +41,19 @@ create table profiles (
   created_at timestamptz default now()
 );
 
+-- Oyuncu kiralama özelliği (basit versiyon):
+-- Fiyat sadece bilgi amaçlı, gerçek ödeme uygulama dışında.
+alter table profiles
+  add column available_for_hire boolean not null default false,
+  add column hire_price numeric(10,2);
 
--- ACTIVITIES: kaptanın açtığı aktiviteler.
+
+-- ============================================
+-- 3) ACTIVITIES: kaptanın açtığı aktiviteler.
 -- district = herkese açık (bölge/mahalle bilgisi)
--- full_address = veritabanında her zaman dolu, ama erişimi RLS ile
--- kısıtlayacağız (sadece onaylı katılımcı/kaptan görebilecek) - bu
--- kısıtlamayı henüz yazmadık, sırası 5. adımda gelecek.
+-- full_address = veritabanında her zaman dolu, ama erişimi
+-- activities_public view'ı ile kısıtlanıyor (aşağıda).
+-- ============================================
 create table activities (
   id uuid primary key default gen_random_uuid(),
   captain_id uuid not null references profiles(id) on delete cascade,
@@ -57,10 +70,9 @@ create table activities (
 );
 
 
--- ACTIVITY_PARTICIPANTS: başvuru / onay / waitlist / takım ataması.
--- Otomasyon (waitlist'e otomatik düşme, takımların otomatik oluşması)
--- HENÜZ YOK - bu sade tablo, otomasyonu ayrı bir adımda (trigger'larla)
--- ekleyeceğiz, ikisini karıştırmamak için.
+-- ============================================
+-- 4) ACTIVITY_PARTICIPANTS: başvuru / onay / waitlist / takım ataması.
+-- ============================================
 create table activity_participants (
   id uuid primary key default gen_random_uuid(),
   activity_id uuid not null references activities(id) on delete cascade,
@@ -73,21 +85,11 @@ create table activity_participants (
 );
 
 
--- Oyuncu kiralama özelliği (basit versiyon - Seçenek A):
--- Fiyat sadece bilgi amaçlı, gerçek ödeme uygulama dışında.
--- Kaptanlar bu alanlara göre "kiralanabilir" oyuncuları arayıp
--- davet edebilecek (arama ekranı ayrı bir aşamada eklenecek).
-alter table profiles
-  add column available_for_hire boolean not null default false,
-  add column hire_price numeric(10,2);
-
-
-
+-- ============================================
 -- OTOMASYON 1: Waitlist
--- Bir başvuru geldiğinde, kontenjan zaten doluysa (onaylı sayısı >=
--- capacity), yeni başvuruyu otomatik olarak 'waitlisted' yap.
--- Test edildi: kapasitesi 2 olan bir aktivitede, 2 kişi onaylandıktan
--- sonra 3. başvuru otomatik waitlisted oldu.
+-- Bir başvuru geldiğinde, kontenjan zaten doluysa (onaylı sayısı
+-- >= capacity), yeni başvuruyu otomatik olarak 'waitlisted' yap.
+-- ============================================
 create function fn_apply_or_waitlist()
 returns trigger as $$
 declare
@@ -112,12 +114,12 @@ create trigger trg_apply_or_waitlist
   before insert on activity_participants
   for each row execute function fn_apply_or_waitlist();
 
-  
+
+-- ============================================
 -- OTOMASYON 2: Waitlist terfisi
 -- Onaylı bir katılımcı iptal ederse veya reddedilirse, waitlist'teki
 -- en eski başvuran kişi otomatik olarak onaylanır.
--- Test edildi: onaylı Mehmet iptal edince, waitlist'teki Ahmet
--- otomatik olarak approved oldu.
+-- ============================================
 create function fn_promote_waitlist()
 returns trigger as $$
 declare
@@ -145,12 +147,11 @@ create trigger trg_promote_waitlist
   for each row execute function fn_promote_waitlist();
 
 
-  
+-- ============================================
 -- OTOMASYON 3: Otomatik rastgele takım oluşturma
--- Takım sporlarında (sports.category = 'team') kontenjan tam dolunca,
--- onaylı katılımcılar rastgele iki takıma (A/B) bölünür.
--- Test edildi: 2 kişilik basketbol aktivitesinde, 2. onaydan hemen
--- sonra her iki katılımcıya da otomatik A/B takımı atandı.
+-- Takım sporlarında (sports.category = 'team') kontenjan tam
+-- dolunca, onaylı katılımcılar rastgele iki takıma (A/B) bölünür.
+-- ============================================
 create function fn_assign_teams()
 returns trigger as $$
 declare
@@ -190,3 +191,78 @@ create trigger trg_assign_teams
   after update on activity_participants
   for each row execute function fn_assign_teams();
 
+
+-- ============================================
+-- RLS (ROW LEVEL SECURITY) - tüm tablolar için eksiksiz
+-- ============================================
+
+-- SPORTS: herkes okuyabilir, kimse yazamaz (sabit liste)
+alter table sports enable row level security;
+create policy "sports_select_all" on sports for select using (true);
+
+-- PROFILES: herkes okuyabilir, sadece kendi profilini günceller
+alter table profiles enable row level security;
+create policy "profiles_select_all" on profiles for select using (true);
+create policy "profiles_update_own" on profiles for update using (auth.uid() = id);
+
+-- Kayıt olunca profili OTOMATİK oluşturan mekanizma:
+-- auth.users tablosuna yeni bir kullanıcı eklendiğinde (SMS doğrulama
+-- tamamlandığında), bu trigger devreye girip profiles tablosunda
+-- karşılık gelen satırı kendisi açar.
+create function fn_create_profile_for_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, full_name)
+  values (new.id, coalesce(new.phone, 'Yeni Kullanıcı'));
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger trg_create_profile_for_new_user
+  after insert on auth.users
+  for each row execute function fn_create_profile_for_new_user();
+
+-- ACTIVITIES: herkes okuyabilir, sadece kaptan yazabilir/değiştirebilir
+alter table activities enable row level security;
+create policy "activities_select_all" on activities for select using (true);
+create policy "activities_insert_own" on activities for insert with check (auth.uid() = captain_id);
+create policy "activities_update_captain" on activities for update using (auth.uid() = captain_id);
+create policy "activities_delete_captain" on activities for delete using (auth.uid() = captain_id);
+
+-- ADRES GİZLİLİĞİ view'ı: full_address sadece kaptan veya onaylı
+-- katılımcı için dolu gelir, aksi halde null. Uygulama artık ham
+-- 'activities' yerine bu view'ı sorgulamalı.
+create view activities_public as
+select
+  a.id, a.captain_id, a.sport_id, a.title, a.description,
+  a.district, a.scheduled_at, a.capacity, a.price_per_person,
+  a.status, a.created_at,
+  case
+    when auth.uid() = a.captain_id then a.full_address
+    when exists (
+      select 1 from activity_participants p
+      where p.activity_id = a.id and p.user_id = auth.uid() and p.status = 'approved'
+    ) then a.full_address
+    else null
+  end as full_address
+from activities a;
+
+-- View'lar RLS'ten ayrı olarak erişim izni (GRANT) gerektirir -
+-- RLS "hangi satırı görebilirsin", GRANT "bu view'a erişimin var mı" sorusu.
+grant select on activities_public to anon, authenticated;
+
+-- ACTIVITY_PARTICIPANTS: kullanıcı kendi başvurusunu, kaptan kendi
+-- aktivitesinin tüm başvurularını görebilir; kullanıcı kendi adına
+-- başvurabilir/iptal edebilir, kaptan onaylayıp/reddedebilir.
+alter table activity_participants enable row level security;
+create policy "participants_select" on activity_participants for select
+  using (
+    auth.uid() = user_id
+    or auth.uid() in (select captain_id from activities where id = activity_id)
+  );
+create policy "participants_insert_own" on activity_participants for insert with check (auth.uid() = user_id);
+create policy "participants_update" on activity_participants for update
+  using (
+    auth.uid() = user_id
+    or auth.uid() in (select captain_id from activities where id = activity_id)
+  );
