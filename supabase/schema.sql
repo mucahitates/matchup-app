@@ -306,3 +306,28 @@ grant select, insert, update on activity_participants to authenticated;
 
 grant select on activities to anon;
 grant select on profiles to anon;
+
+
+-- ============================================
+-- COUNTRIES: telefon girişindeki ülke kodu seçici için.
+-- sports/districts ile aynı mantık - UI'da sabit veri yerine
+-- veritabanında, genişleyebilir liste.
+-- ============================================
+create table countries (
+  id uuid primary key default gen_random_uuid(),
+  code text not null unique,
+  flag text not null,
+  name text not null,
+  sort_order int not null default 0
+);
+
+insert into countries (code, flag, name, sort_order) values
+  ('+90', '🇹🇷', 'Türkiye', 1),
+  ('+1', '🇺🇸', 'ABD', 2),
+  ('+44', '🇬🇧', 'İngiltere', 3),
+  ('+49', '🇩🇪', 'Almanya', 4);
+
+alter table countries enable row level security;
+create policy "countries_select_all" on countries for select using (true);
+
+grant select on countries to anon, authenticated;
