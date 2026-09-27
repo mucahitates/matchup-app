@@ -1,1 +1,0 @@
-// Deme dosyası silindi

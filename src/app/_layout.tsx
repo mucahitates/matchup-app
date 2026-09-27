@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { DarkTheme, DefaultTheme, ThemeProvider, Slot, useRouter, useSegments } from 'expo-router';
+import { DarkTheme, DefaultTheme, ThemeProvider, Slot, Redirect, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useColorScheme } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
@@ -14,7 +14,6 @@ export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const segments = useSegments();
-  const router = useRouter();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -29,27 +28,25 @@ export default function RootLayout() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (checkingSession) return;
-
-    const inAuthGroup = segments[0] === '(auth)';
-
-    if (!session && !inAuthGroup) {
-      router.replace('/(auth)/phone');
-    } else if (session && inAuthGroup) {
-      // Tabs grubu içindeki ana sayfa yolu
-      router.replace('/(tabs)/index');
-    }
-  }, [session, checkingSession, segments]);
-
   if (checkingSession) return null;
+
+  const inAuthGroup = segments[0] === '(auth)';
+
+  // Deklaratif yönlendirme: router.replace() gibi "komut vermiyoruz",
+  // render sırasında "burada olman gerekmiyor, şuraya git" diyoruz.
+  // Bu, Expo Router'ın resmi olarak önerdiği auth-guard deseni -
+  // imperative router.replace()'in useEffect içinde sessizce
+  // başarısız olma riskini tamamen ortadan kaldırıyor.
+  if (!session && !inAuthGroup) {
+    return <Redirect href="/(auth)/phone" />;
+  }
+  if (session && inAuthGroup) {
+    return <Redirect href={"/(tabs)" as any} />;
+  }
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AnimatedSplashOverlay />
-      {/* Artık koşulsuz - Slot her zaman "şu an aktif olan grubun
-          layout'unu" gösterir: (auth) aktifse phone/verify, (tabs)
-          aktifse yukarıda oluşturduğumuz (tabs)/_layout.tsx (yani AppTabs) */}
       <Slot />
     </ThemeProvider>
   );
