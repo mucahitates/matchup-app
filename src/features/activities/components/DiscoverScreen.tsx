@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet } from 'react-native';
+import { FlatList, RefreshControl, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -20,9 +20,6 @@ export default function DiscoverScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // fetchActivities'i useEffect DIŞINA aldık çünkü artık iki farklı
-  // yerden çağıracağız: ekran odaklandığında (useFocusEffect) ve
-  // kullanıcı elle aşağı çektiğinde (RefreshControl).
   const fetchActivities = useCallback(async () => {
     const { data, error } = await supabase
       .from('activities_public')
@@ -36,10 +33,6 @@ export default function DiscoverScreen() {
     }
   }, []);
 
-  // useFocusEffect: bu ekran her "odaklandığında" (ilk açılışta VE
-  // başka bir sekmeden buraya her dönüldüğünde) içindeki kodu çalıştırır.
-  // useEffect'ten farkı tam olarak bu - useEffect sadece ekran ilk
-  // oluşturulduğunda çalışırdı, bu ise her geri dönüşte tekrar tetiklenir.
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
@@ -64,10 +57,10 @@ export default function DiscoverScreen() {
           data={activities}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <ThemedView style={styles.card}>
+            <TouchableOpacity style={styles.card} onPress={() => router.push(`/activity/${item.id}`)}>
               <ThemedText type="smallBold">{item.title}</ThemedText>
               <ThemedText type="small">{item.district}</ThemedText>
-            </ThemedView>
+            </TouchableOpacity>
           )}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
