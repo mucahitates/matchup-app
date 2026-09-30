@@ -1,14 +1,12 @@
-import { useEffect, useState } from 'react';
-import { FlatList, StyleSheet } from 'react-native';
+import { useCallback, useState } from 'react';
+import { FlatList, RefreshControl, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { supabase } from '@/lib/supabase';
 
-// Supabase'den dönen bir aktivite satırının şeklini tanımlıyoruz.
-// Bu, TypeScript'e "bu obje şu alanlara sahip olacak" diyerek
-// yazım hatalarını daha kod çalışmadan yakalamamızı sağlıyor.
 type Activity = {
   id: string;
   title: string;
@@ -18,36 +16,42 @@ type Activity = {
 };
 
 export default function DiscoverScreen() {
-  // useState: "activities" isminde bir değişken ve onu değiştirecek
-  // "setActivities" fonksiyonunu oluşturuyoruz. Başlangıç değeri: boş dizi.
-  // activities değiştiğinde ekran otomatik yeniden çizilir.
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // useEffect: ekran ilk açıldığında (component "mount" olduğunda)
-  // içindeki kodu bir kere çalıştırır. Sondaki [] (boş dizi), "sadece
-  // bir kere, ekran ilk açılırken çalış" anlamına geliyor - içine
-  // bir değişken koysaydık, o değişken her değiştiğinde tekrar çalışırdı.
-  useEffect(() => {
-    async function fetchActivities() {
-      // supabase.from('activities') -> "activities" tablosuna git
-      // .select('id, title, district, scheduled_at, capacity') -> bu kolonları getir
-      // .eq('status', 'open') -> sadece status'u 'open' olanları getir
-      const { data, error } = await supabase
-        .from('activities_public')
-        .select('id, title, district, scheduled_at, capacity')
-        .eq('status', 'open');
+  // fetchActivities'i useEffect DIŞINA aldık çünkü artık iki farklı
+  // yerden çağıracağız: ekran odaklandığında (useFocusEffect) ve
+  // kullanıcı elle aşağı çektiğinde (RefreshControl).
+  const fetchActivities = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('activities_public')
+      .select('id, title, district, scheduled_at, capacity')
+      .eq('status', 'open');
 
-      if (error) {
-        console.log('Aktiviteler çekilirken hata:', error.message);
-      } else {
-        setActivities(data);
-      }
-      setLoading(false);
+    if (error) {
+      console.log('Aktiviteler çekilirken hata:', error.message);
+    } else {
+      setActivities(data);
     }
-
-    fetchActivities();
   }, []);
+
+  // useFocusEffect: bu ekran her "odaklandığında" (ilk açılışta VE
+  // başka bir sekmeden buraya her dönüldüğünde) içindeki kodu çalıştırır.
+  // useEffect'ten farkı tam olarak bu - useEffect sadece ekran ilk
+  // oluşturulduğunda çalışırdı, bu ise her geri dönüşte tekrar tetiklenir.
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      fetchActivities().finally(() => setLoading(false));
+    }, [fetchActivities])
+  );
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await fetchActivities();
+    setRefreshing(false);
+  }
 
   return (
     <ThemedView style={styles.container}>
@@ -65,6 +69,9 @@ export default function DiscoverScreen() {
               <ThemedText type="small">{item.district}</ThemedText>
             </ThemedView>
           )}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
           ListEmptyComponent={
             !loading ? <ThemedText>Şu an açık aktivite yok.</ThemedText> : null
           }
