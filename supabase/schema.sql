@@ -331,3 +331,14 @@ alter table countries enable row level security;
 create policy "countries_select_all" on countries for select using (true);
 
 grant select on countries to anon, authenticated;
+
+
+
+-- Onaylı katılımcı sayısı/listesi HERKESE açık olmalı (Match Detail
+-- ekranında "5/10 katıldı" gibi bilgiler için, kaptan/başvuran olmasa
+-- bile). pending/waitlisted/rejected hâlâ gizli - sadece approved.
+-- Postgres'te birden fazla select policy OR mantığıyla birleşir,
+-- mevcut participants_select kuralını bozmuyor, üzerine ekliyor.
+create policy "participants_select_approved_public"
+on activity_participants for select
+using (status = 'approved');
