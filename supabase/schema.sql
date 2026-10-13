@@ -342,3 +342,29 @@ grant select on countries to anon, authenticated;
 create policy "participants_select_approved_public"
 on activity_participants for select
 using (status = 'approved');
+
+
+-- Mevcut tüm aktiviteler test verisi. Eski modelde kaptan katılımcı
+-- olarak kayıtlı değildi, onları yamamak yerine siliyoruz (cascade ile
+-- bağlı başvurular da gider). Yeni aktiviteler doğru modelle açılacak.
+delete from activities;
+
+-- Yeni aktivite oluşturulunca, kaptanı otomatik 'approved' katılımcı
+-- olarak ekler. Böylece:
+--  - sayaç kaptanı da sayar (1/4 ile başlar)
+--  - kontenjan dolunca takım ataması kaptanı da kapsar
+--  - fn_assign_teams ve fn_apply_or_waitlist değişmeden çalışmaya devam eder
+-- security definer: ileride participants policy'lerini sıkılaştırsak da
+-- bu otomatik ekleme bozulmasın diye. search_path sabitlenir (güvenlik).
+create function fn_add_captain_as_participant()
+returns trigger as $$
+begin
+  insert into public.activity_participants (activity_id, user_id, status)
+  values (new.id, new.captain_id, 'approved');
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+create trigger trg_add_captain_as_participant
+  after insert on activities
+  for each row execute function fn_add_captain_as_participant();

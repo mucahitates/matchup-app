@@ -153,7 +153,7 @@ export default function CreateActivityScreen() {
               placeholderTextColor="#8B9284"
             />
 
-            <ThemedText type="smallBold" style={styles.label}>Kontenjan</ThemedText>
+            <ThemedText type="smallBold" style={styles.label}>Toplam kişi sayısı (kaptan dahil)</ThemedText>
             <TextInput
               style={styles.input}
               value={capacity}

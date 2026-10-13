@@ -110,7 +110,7 @@ export default function MatchDetailScreen({ activityId }: { activityId: string }
   if (loading || !activity) {
     return (
       <ThemedView style={styles.container}>
-        <SafeAreaView>
+        <SafeAreaView edges={['bottom']}>
           <ThemedText>Yükleniyor…</ThemedText>
         </SafeAreaView>
       </ThemedView>
@@ -125,7 +125,7 @@ export default function MatchDetailScreen({ activityId }: { activityId: string }
 
   return (
     <ThemedView style={styles.container}>
-      <SafeAreaView>
+      <SafeAreaView edges={['bottom']}>
         <FlatList
           data={[]} // Ana içerik ListHeaderComponent'te, FlatList'i sadece scroll için kullanıyoruz
           renderItem={null}
@@ -158,7 +158,7 @@ export default function MatchDetailScreen({ activityId }: { activityId: string }
                 </TouchableOpacity>
               )}
 
-              {myParticipation && (
+              {myParticipation && !isCaptain && (
                 <ThemedText type="small" style={styles.myStatus}>
                   Durumun: {myParticipation.status}
                 </ThemedText>
