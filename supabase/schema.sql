@@ -368,3 +368,51 @@ $$ language plpgsql security definer set search_path = public;
 create trigger trg_add_captain_as_participant
   after insert on activities
   for each row execute function fn_add_captain_as_participant();
+
+  -- Önce bozuk test verisini temizle: onaylı sayısı kontenjanı aşan aktiviteleri sil.
+delete from activities a
+where (
+  select count(*) from activity_participants p
+  where p.activity_id = a.id and p.status = 'approved'
+) > a.capacity;
+
+-- ONAY ANINDA KONTENJAN KONTROLÜ
+-- Bir başvuru 'approved' yapılırken, aktivitede zaten kontenjan kadar
+-- onaylı kişi varsa işlemi reddeder. Sonuç: onaylı sayısı hiçbir zaman
+-- kontenjanı aşamaz. Hata mesajı uygulamada Alert olarak görünür
+-- (decideParticipant zaten error.message'ı gösteriyor).
+create function fn_enforce_capacity_on_approval()
+returns trigger as $$
+declare
+  v_capacity int;
+  v_approved_count int;
+begin
+  -- Sadece "onaylı olmayan -> onaylı" geçişinde kontrol et.
+  if new.status = 'approved' and old.status is distinct from 'approved' then
+
+    -- Aktivite satırını kilitle (for update): iki onay aynı anda gelirse
+    -- sıraya girerler, ikisi birden kontrolden geçip kontenjanı aşamaz.
+    select capacity into v_capacity
+      from activities where id = new.activity_id for update;
+
+    -- Bu satırın kendisi hariç (id <> new.id), kaç onaylı var?
+    select count(*) into v_approved_count
+      from activity_participants
+      where activity_id = new.activity_id
+        and status = 'approved'
+        and id <> new.id;
+
+    if v_approved_count >= v_capacity then
+      raise exception 'Kontenjan dolu, bu başvuru onaylanamaz.';
+    end if;
+  end if;
+
+  return new;
+end;
+$$ language plpgsql;
+
+-- BEFORE UPDATE: satır kaydedilmeden önce çalışır, exception fırlatırsa
+-- güncelleme hiç yapılmaz (ve takım atama trigger'ları da hiç tetiklenmez).
+create trigger trg_enforce_capacity_on_approval
+  before update on activity_participants
+  for each row execute function fn_enforce_capacity_on_approval();
