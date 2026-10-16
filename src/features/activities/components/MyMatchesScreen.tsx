@@ -7,12 +7,10 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { supabase } from '@/lib/supabase';
 
-// ---------------------------------------------------------------
-// TİPLER
-// ---------------------------------------------------------------
 type ParticipantStatus = 'pending' | 'approved' | 'rejected' | 'waitlisted' | 'cancelled';
 
-// activities_public view'ından çektiğimiz alanlar.
+// activities_public view'ından çektiğimiz alanlar. status: iptal edilen
+// maçları ayırt etmek için eklendi.
 type Activity = {
   id: string;
   captain_id: string;
@@ -20,17 +18,17 @@ type Activity = {
   district: string;
   scheduled_at: string;
   capacity: number;
+  status: 'open' | 'full' | 'completed' | 'cancelled';
 };
 
-// Ekranda gösterilecek satır: maç bilgisi + benim o maçtaki durumum.
+// Ekranda gösterilen satır: maç bilgisi + benim durumum + kaç oyuncuyu
+// hâlâ puanlamadığım.
 type MyMatch = Activity & {
   myStatus: ParticipantStatus;
   isCaptain: boolean;
+  pendingRatings: number;
 };
 
-// Veritabanı durum kodlarını ekranda gösterilecek metne çeviriyoruz
-// (MatchDetailScreen'deki mantıkla aynı; ikisini ileride tek dosyaya
-// taşıyabiliriz).
 const STATUS_LABELS: Record<ParticipantStatus, string> = {
   pending: 'Kaptan onayı bekleniyor',
   approved: 'Onaylandın',
@@ -49,10 +47,9 @@ export default function MyMatchesScreen() {
     const userId = userData.user?.id;
     if (!userId) return;
 
-    // 1) Benim başvuru satırlarım. RLS (participants_select) zaten
-    // sadece kendi satırlarımı ve kaptan olduklarımın satırlarını döner,
-    // o yüzden user_id filtresini de açıkça yazıyoruz: kaptan olduğum
-    // maçlardaki başkalarının satırları bu listeye karışmasın.
+    // 1) Benim başvuru satırlarım. user_id filtresi açıkça yazılı:
+    // RLS kaptan olduğum maçların başkalarına ait satırlarını da
+    // gösterebilir, onlar bu listeye karışmasın.
     const { data: myRows, error: rowsError } = await supabase
       .from('activity_participants')
       .select('activity_id, status')
@@ -63,8 +60,7 @@ export default function MyMatchesScreen() {
       return;
     }
 
-    // Reddedilen ve iptal ettiğim maçları listelemiyoruz (artık beni
-    // ilgilendirmiyor). İleride istersek "arşiv" olarak ekleriz.
+    // Reddedilen ve kendi iptal ettiğim maçlar listelenmez.
     const relevant = (myRows ?? []).filter(
       (r) => r.status !== 'rejected' && r.status !== 'cancelled'
     );
@@ -74,14 +70,11 @@ export default function MyMatchesScreen() {
       return;
     }
 
-    // 2) Bu maçların bilgileri. activities_public kullanıyoruz, çünkü
-    // ham activities tablosunda full_address okuma yetkimiz yok (bilerek).
-    // Join yerine iki sorgu: view'lar üzerinde foreign key ilişkisi
-    // olmadığı için PostgREST'in otomatik join'i çalışmaz.
+    // 2) Bu maçların bilgileri (ham tabloda adres yetkimiz yok, view kullanıyoruz).
     const ids = relevant.map((r) => r.activity_id);
     const { data: activities, error: activitiesError } = await supabase
       .from('activities_public')
-      .select('id, captain_id, title, district, scheduled_at, capacity')
+      .select('id, captain_id, title, district, scheduled_at, capacity, status')
       .in('id', ids);
 
     if (activitiesError) {
@@ -89,19 +82,34 @@ export default function MyMatchesScreen() {
       return;
     }
 
-    // 3) İki sonucu birleştir: her maça benim durumumu ekle.
-    const statusByActivity = new Map(relevant.map((r) => [r.activity_id, r.status as ParticipantStatus]));
+    // 3) Puanlanmayı bekleyen oyuncu sayıları (my_pending_ratings view'ı).
+    // Hata olursa listeyi yine de gösteriyoruz, sadece rozetler görünmez.
+    const { data: pendingRows, error: pendingError } = await supabase
+      .from('my_pending_ratings')
+      .select('activity_id, pending_count');
+
+    if (pendingError) {
+      console.log('Bekleyen puanlar çekilirken hata:', pendingError.message);
+    }
+    const pendingByActivity = new Map(
+      (pendingRows ?? []).map((p) => [p.activity_id as string, p.pending_count as number])
+    );
+
+    // 4) Üç sonucu birleştir.
+    const statusByActivity = new Map(
+      relevant.map((r) => [r.activity_id, r.status as ParticipantStatus])
+    );
 
     const merged: MyMatch[] = (activities ?? []).map((a) => ({
       ...a,
       myStatus: statusByActivity.get(a.id)!,
       isCaptain: a.captain_id === userId,
+      pendingRatings: pendingByActivity.get(a.id) ?? 0,
     }));
 
     setMatches(merged);
   }, []);
 
-  // Sekmeye her dönüldüğünde yeniden çek (Discover'da öğrendiğimiz desen).
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
@@ -117,28 +125,33 @@ export default function MyMatchesScreen() {
 
   // ---------------------------------------------------------------
   // BÖLÜMLERE AYIRMA
-  // Tek bir listeyi, tarih ve duruma göre üç gruba bölüyoruz.
+  // İptal edilen maçlar diğer bölümlere girmez, kendi bölümünde görünür.
   // ---------------------------------------------------------------
   const now = new Date();
   const isPast = (m: MyMatch) => new Date(m.scheduled_at) < now;
+  const isCancelled = (m: MyMatch) => m.status === 'cancelled';
+  const byDateAsc = (a: MyMatch, b: MyMatch) => a.scheduled_at.localeCompare(b.scheduled_at);
+  const byDateDesc = (a: MyMatch, b: MyMatch) => b.scheduled_at.localeCompare(a.scheduled_at);
 
-  // Yaklaşan: onaylı (kaptan dahil) ve tarihi gelmemiş. En yakın tarih üstte.
   const upcoming = matches
-    .filter((m) => m.myStatus === 'approved' && !isPast(m))
-    .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+    .filter((m) => m.myStatus === 'approved' && !isPast(m) && !isCancelled(m))
+    .sort(byDateAsc);
 
-  // Başvurularım: henüz onaylanmamış (bekleyen ya da bekleme listesi), tarihi gelmemiş.
   const applications = matches
-    .filter((m) => (m.myStatus === 'pending' || m.myStatus === 'waitlisted') && !isPast(m))
-    .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+    .filter((m) => (m.myStatus === 'pending' || m.myStatus === 'waitlisted') && !isPast(m) && !isCancelled(m))
+    .sort(byDateAsc);
 
-  // Geçmiş: katıldığım (onaylı) ve tarihi geçmiş. En yeni üstte.
   const past = matches
-    .filter((m) => m.myStatus === 'approved' && isPast(m))
-    .sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
+    .filter((m) => m.myStatus === 'approved' && isPast(m) && !isCancelled(m))
+    .sort(byDateDesc);
 
-  // Bir maç satırını çizen yardımcı fonksiyon. Üç bölümde de aynı
-  // görünümü kullandığımız için tek yerde tanımlı.
+  // İptal edilenler: sadece tarihi gelmemiş olanlar. Tarih geçince
+  // listeden kendiliğinden düşer, liste sonsuza kadar büyümez.
+  const cancelled = matches.filter((m) => isCancelled(m) && !isPast(m)).sort(byDateAsc);
+
+  // Puanlamayı bekleyen maç sayısı (üstteki uyarı için).
+  const toRateCount = past.filter((m) => m.pendingRatings > 0).length;
+
   function renderMatch(m: MyMatch) {
     return (
       <TouchableOpacity
@@ -152,17 +165,28 @@ export default function MyMatchesScreen() {
         <ThemedText type="small">
           {m.district} · {new Date(m.scheduled_at).toLocaleString('tr-TR')}
         </ThemedText>
-        {/* Kaptan için durum yazmıyoruz, anlamsız ("Onaylandın" demek garip). */}
-        {!m.isCaptain && (
-          <ThemedText type="small" style={styles.statusText}>
-            {STATUS_LABELS[m.myStatus]}
+
+        {isCancelled(m) ? (
+          <ThemedText type="small" style={styles.cancelledText}>🚫 İptal edildi</ThemedText>
+        ) : (
+          // Kaptan için durum yazmıyoruz ("Onaylandın" demek anlamsız).
+          !m.isCaptain && (
+            <ThemedText type="small" style={styles.statusText}>{STATUS_LABELS[m.myStatus]}</ThemedText>
+          )
+        )}
+
+        {/* Puanlama rozeti: sadece 7 günlük pencere içindeki maçlarda gelir */}
+        {m.pendingRatings > 0 && (
+          <ThemedText type="smallBold" style={styles.rateBadge}>
+            ⭐ {m.pendingRatings} oyuncuyu puanla
           </ThemedText>
         )}
       </TouchableOpacity>
     );
   }
 
-  const isEmpty = upcoming.length === 0 && applications.length === 0 && past.length === 0;
+  const isEmpty =
+    upcoming.length === 0 && applications.length === 0 && past.length === 0 && cancelled.length === 0;
 
   return (
     <ThemedView style={styles.container}>
@@ -177,6 +201,15 @@ export default function MyMatchesScreen() {
             <ThemedText style={styles.empty}>
               Henüz bir maçın yok. Discover'dan bir maça başvur ya da Create ile kendi maçını aç.
             </ThemedText>
+          )}
+
+          {/* Kullanıcı puanlama fırsatını kaçırmasın: üstte tek satırlık uyarı */}
+          {toRateCount > 0 && (
+            <ThemedView style={styles.banner}>
+              <ThemedText type="small" style={styles.bannerText}>
+                ⭐ {toRateCount} maçta puanlamayı bekleyen oyuncular var. Puanlama maçtan sonra 7 gün açık.
+              </ThemedText>
+            </ThemedView>
           )}
 
           {upcoming.length > 0 && (
@@ -199,6 +232,13 @@ export default function MyMatchesScreen() {
               {past.map(renderMatch)}
             </>
           )}
+
+          {cancelled.length > 0 && (
+            <>
+              <ThemedText type="smallBold" style={styles.sectionTitle}>İptal edilenler</ThemedText>
+              {cancelled.map(renderMatch)}
+            </>
+          )}
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
@@ -215,5 +255,14 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   statusText: { marginTop: 4, color: '#D98E3E' },
+  cancelledText: { marginTop: 4, color: '#B3452E', fontWeight: '600' },
+  rateBadge: { marginTop: 6, color: '#2F5233' },
+  banner: {
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  bannerText: { color: '#2F5233' },
   empty: { marginTop: 24 },
 });

@@ -61,7 +61,9 @@ create table profiles (
   created_at timestamptz default now(),
   -- İsim kuralı veritabanında: uygulama atlansa bile geçersiz isim girilemez.
   constraint profiles_full_name_length
-    check (char_length(btrim(full_name)) between 2 and 40)
+    check (char_length(btrim(full_name)) between 2 and 40),
+  constraint profiles_bio_length
+    check (bio is null or char_length(bio) <= 200),
 );
 
 -- ACTIVITIES: kaptanın açtığı aktiviteler.
@@ -176,18 +178,24 @@ declare
   v_captain_id uuid;
   v_capacity int;
   v_status text;
+  v_scheduled_at timestamptz;
   v_approved_count int;
 begin
-  select captain_id, capacity, status into v_captain_id, v_capacity, v_status
+  select captain_id, capacity, status, scheduled_at
+    into v_captain_id, v_capacity, v_status, v_scheduled_at
     from activities where id = new.activity_id;
 
-  -- Kaptanın kendi satırı sistem tarafından eklenir (3.2), ona dokunma.
+  -- Kaptanın kendi satırı sistem tarafından eklenir, ona dokunma.
   if new.user_id = v_captain_id then
     return new;
   end if;
 
   if v_status in ('completed', 'cancelled') then
     raise exception 'Bu aktivite artık başvuru kabul etmiyor.';
+  end if;
+
+  if v_scheduled_at < now() then
+    raise exception 'Bu maçın tarihi geçti, başvuru yapılamaz.';
   end if;
 
   new.status := 'pending';
@@ -204,38 +212,6 @@ begin
   return new;
 end;
 $$ language plpgsql;
-
-create trigger trg_apply_or_waitlist
-  before insert on activity_participants
-  for each row execute function fn_apply_or_waitlist();
-
-
--- 3.4) Onay anında kontenjan kontrolü: onaylı sayısı kontenjanı AŞAMAZ.
--- for update: iki onay aynı anda gelirse sıraya girerler.
-create function fn_enforce_capacity_on_approval()
-returns trigger as $$
-declare
-  v_capacity int;
-  v_approved_count int;
-begin
-  if new.status = 'approved' and old.status is distinct from 'approved' then
-    select capacity into v_capacity
-      from activities where id = new.activity_id for update;
-
-    select count(*) into v_approved_count
-      from activity_participants
-      where activity_id = new.activity_id
-        and status = 'approved'
-        and id <> new.id;
-
-    if v_approved_count >= v_capacity then
-      raise exception 'Kontenjan dolu, bu başvuru onaylanamaz.';
-    end if;
-  end if;
-
-  return new;
-end;
-$$ language plpgsql security definer set search_path = public;
 
 create trigger trg_enforce_capacity_on_approval
   before update on activity_participants
@@ -502,3 +478,27 @@ grant select (id, captain_id, sport_id, title, description, district,
 grant insert, update, delete on activities to authenticated;
 
 grant select, insert, update on activity_participants to authenticated;
+
+
+
+/*
+Canlı veritabanı için tek seferlik SQL
+
+Dosyanın tamamını canlı veritabanında çalıştırma, tablolar zaten var. Dosya sıfırdan kurulum içindir. Canlıda sadece 1. maddedeki adres deliğini kapatmak için şunu çalıştır:
+
+revoke select on activities from anon, authenticated;
+
+grant select (id, captain_id, sport_id, title, description, district,
+              scheduled_at, capacity, price_per_person, status, created_at)
+  on activities to authenticated;
+
+Sonra doğrulama:
+
+select
+  exists (select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = 'profiles'
+            and column_name = 'profile_completed')                              as onboarding_sql_calisti,
+  has_column_privilege('anon', 'public.activities', 'full_address', 'select')          as anon_adres_okuyabilir,
+  has_column_privilege('authenticated', 'public.activities', 'full_address', 'select') as auth_adres_okuyabilir,
+  has_column_privilege('authenticated', 'public.activities', 'captain_id', 'select')   as auth_captain_id_okuyabilir;
+*/

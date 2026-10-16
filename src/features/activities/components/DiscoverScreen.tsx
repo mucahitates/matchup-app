@@ -29,6 +29,7 @@ export default function DiscoverScreen() {
       .from('activities_public')
       .select('id, title, district, scheduled_at, capacity, status')
       .in('status', ['open', 'full'])
+      .gte('scheduled_at', new Date().toISOString())
       .order('scheduled_at', { ascending: true });
 
     if (error) {
